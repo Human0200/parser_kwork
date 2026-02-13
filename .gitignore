@@ -1,0 +1,6 @@
+venv/
+*.html
+*.db
+*.json
+*.pyc
+config.py
