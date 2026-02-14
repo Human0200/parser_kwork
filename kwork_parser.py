@@ -333,6 +333,14 @@ class KworkParser:
         self.db.disconnect()
         return count
 
+    def clear_database(self):
+        """
+        Очищает базу данных (последние 100 проектов) для предотвращения переполнения
+        """
+        self.db.connect()
+        self.db.clear_projects()
+        self.db.disconnect()
+
 
 def main():
     """Основная функция для запуска парсера"""
@@ -385,7 +393,10 @@ def main():
                 print(f"⊘ Пропущено: {stats['skipped_existing']}")
                 print(f"💾 Всего в БД: {stats['db_total_projects']}")
                 print("="*60)
-                
+
+                if stats['db_total_projects'] > 130:
+                    parser.clear_database()
+
                 # Ожидание перед следующим запуском
                 interval_seconds = interval_minutes * 60
                 next_run = time.strftime('%H:%M:%S', time.localtime(time.time() + interval_seconds))

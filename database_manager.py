@@ -298,3 +298,10 @@ class DatabaseManager:
         
         print(f"✓ Экспортировано {len(projects)} проектов в {output_file}")
         return len(projects)
+
+    def clear_projects(self):
+        """
+        Очищает таблицу проектов (последние 100)
+        """
+        self.cursor.execute("DELETE FROM projects WHERE id IN (SELECT id FROM projects ORDER BY created_at DESC LIMIT 100)")
+        self.conn.commit()
