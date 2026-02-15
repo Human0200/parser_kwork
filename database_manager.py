@@ -303,5 +303,5 @@ class DatabaseManager:
         """
         Очищает таблицу проектов (последние 100)
         """
-        self.cursor.execute("DELETE FROM projects WHERE id IN (SELECT id FROM projects ORDER BY created_at DESC LIMIT 100)")
+        self.cursor.execute("DELETE FROM projects WHERE id IN (SELECT id FROM projects ORDER BY created_at ASC LIMIT 100)")
         self.conn.commit()

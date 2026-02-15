@@ -143,7 +143,7 @@ class TelegramBot:
         """
         name = self._escape_html(project.get('name', 'Без названия'))
         description = self._escape_html(project.get('description', 'Нет описания'))
-        workers = self._escape_html(project.get('kwork_count', 'нет'))
+        workers = self._escape_html(project.get('kwork_count', '0'))
         
         # Обрезаем описание если слишком длинное
         if len(description) > 500:
