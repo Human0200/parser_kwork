@@ -4,3 +4,4 @@ venv/
 *.json
 *.pyc
 config.py
+.env

@@ -11,7 +11,10 @@ import config
 
 class KworkParser:
     """Парсер проектов с сайта kwork.ru с сохранением в БД и отправкой в Telegram"""
-    
+
+    EXCLUDED_WORDS = ['wordpress', 'тильда', 'tilda', 'joomla', 'вордпресс', 'джумла', 'WP']
+    MAX_OFFERS = 5
+
     def __init__(self, db_path: str = "kwork_projects.db", use_telegram: bool = True):
         self.base_url = "https://kwork.ru"
         self.headers = {
@@ -157,6 +160,16 @@ class KworkParser:
             Очищенный словарь с данными проекта
         """
         try:
+            # Kwork has used several names for the proposal counter. Normalize
+            # it once so every consumer applies the same filter.
+            offers_raw = next((data.get(key) for key in (
+                'offers_count', 'offersCount', 'offers', 'offerCount', 'views_dirty'
+            ) if data.get(key) is not None), None)
+            try:
+                offers_count = int(str(offers_raw).replace(' ', '').replace('\u00a0', ''))
+            except (TypeError, ValueError):
+                offers_count = None
+
             project = {
                 'id': data.get('id'),
                 'name': data.get('name', ''),
@@ -167,7 +180,7 @@ class KworkParser:
                 'category_id': data.get('category_id', ''),
                 'status': data.get('status', ''),
                 'time_left': data.get('timeLeft', ''),
-                'offers_count': data.get('views_dirty', 0),
+                'offers_count': offers_count,
                 'date_create': data.get('date_create', ''),
                 'date_active': data.get('date_active', ''),
                 'date_expire': data.get('date_expire', ''),
@@ -237,6 +250,12 @@ class KworkParser:
                     proj_id = proj.get('id')
                     if not proj_id:
                         continue
+
+                    offers = proj.get('offers_count')
+                    if offers is None or offers > self.MAX_OFFERS:
+                        print(f"⛔ Проект ID {proj_id} пропущен: предложений {offers!r}, максимум {self.MAX_OFFERS}")
+                        total_skipped += 1
+                        continue
                     
                     if proj_id in existing_ids:
                         total_skipped += 1
@@ -282,6 +301,11 @@ class KworkParser:
         
         return stats
     
+    def _is_excluded(self, project: Dict) -> bool:
+        """Возвращает True, если проект содержит хотя бы одно исключающее слово"""
+        text = (project.get('name', '') + ' ' + project.get('description', '')).lower()
+        return any(word in text for word in self.EXCLUDED_WORDS)
+
     def _send_to_telegram(self, projects: List[Dict]):
         """
         Отправка проектов в Telegram
@@ -293,6 +317,18 @@ class KworkParser:
             return
         
         try:
+            # Фильтруем проекты с исключающими словами
+            filtered = []
+            for project in projects:
+                if self._is_excluded(project):
+                    print(f"⛔ Проект ID {project.get('id')} пропущен (исключающее слово): {project.get('name', '')[:50]}")
+                else:
+                    filtered.append(project)
+            projects = filtered
+
+            if not projects:
+                return
+
             # Проверяем настройку индивидуальной отправки
             send_individual = getattr(config, 'SEND_INDIVIDUAL_PROJECTS', False)
             
