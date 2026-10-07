@@ -227,6 +227,23 @@ class DatabaseManager:
         
         return {'inserted': inserted, 'skipped': skipped}
     
+    def get_project(self, project_id: int) -> Optional[Dict]:
+        """Получить проект по ID."""
+        self.cursor.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            return None
+        project = dict(row)
+        self.cursor.execute("""
+            SELECT b.* FROM buyers b
+            JOIN project_buyers pb ON b.user_id = pb.buyer_user_id
+            WHERE pb.project_id = ?
+        """, (project_id,))
+        buyer_row = self.cursor.fetchone()
+        if buyer_row:
+            project['buyer'] = dict(buyer_row)
+        return project
+
     def get_all_projects(self) -> List[Dict]:
         """
         Получить все проекты из БД

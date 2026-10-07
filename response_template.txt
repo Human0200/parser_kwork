@@ -1,0 +1,57 @@
+Здравствуйте!
+
+Готовы взяться за вашу задачу. Мы — команда разработчиков с опытом создания сайтов, CRM-систем, Telegram-, MAX- и VK-ботов, Mini Apps, парсеров, личных кабинетов и автоматизации бизнеса.
+
+Разрабатываем проекты под ключ: backend/frontend, интеграции, БД, серверное развёртывание и поддержка.
+
+Сайты и веб-разработка
+WordPress, 1С-Битрикс и собственная разработка.
+
+Примеры:
+https://promolodost.shop/
+https://climbox.ru/
+https://3d-group.space/
+https://daigo.ru/
+https://hypower.ru/
+https://podocentr.by/
+https://legionural.ru/
+https://td-pv.ru/
+https://opalubka.market/
+
+Одни из крупнейших наших проектов:
+
+LOGEA CRM — полноценная CRM: компании, контакты, объекты, потребности, задачи, базы данных, автоматический сбор и обработка информации.
+
+DayCargo — система автоматизации заказов на перевозки: боты, backend, БД, бизнес-логика и обработка заказов.
+
+Telegram-боты:
+@matchmacth_crm_bot
+@shtraf_osporit_bot
+@parser_kwork_dev_bot
+@patternhub_bot
+@Daycargo_loader_makeorder_bot
+@vpn1_support_bot
+@dl_assessors_bot
+@geotracker_telegram_bot
+
+MAX-боты:
+https://max.ru/id183210316680_bot
+https://max.ru/id7751316177_1_bot
+
+Разрабатываем VK-ботов, Mini Apps, CRM и админ-панели. Реализуем оплаты, подписки, бронирование, каталоги, интеграции с 1С, CRM и API.
+
+Парсеры:
+https://marketplace.1c-bitrix.ru/solutions/leadspace.yandexreviewsslider/
+https://marketplace.1c-bitrix.ru/solutions/leadspace.gisreviewsslider/
+https://github.com/Human0200/parser_kwork
+
+Есть решения для СудРФ, досок объявлений и маркетплейсов.
+
+Есть опыт работы в крупных IT-компаниях и проектах: CKASSA, IBS, LeadSpace. Высшее образование по IT-направлению.
+
+Стек: Python, PHP, React, PostgreSQL, Docker, REST API, Bitrix24.
+
+Предоставляем 14 дней технической поддержки. Готовы предложить оптимальный вариант реализации по срокам и стоимости.
+
+С уважением,
+Команда FlowTeam

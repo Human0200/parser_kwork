@@ -6,29 +6,34 @@ from typing import List, Dict, Optional
 import re
 from database_manager import DatabaseManager
 from telegram_bot import TelegramBot
+from telegram_offer_listener import OfferListener
 import config
 
 
 class KworkParser:
     """Парсер проектов с сайта kwork.ru с сохранением в БД и отправкой в Telegram"""
 
-    EXCLUDED_WORDS = ['wordpress', 'тильда', 'tilda', 'joomla', 'вордпресс', 'джумла', 'WP']
-    MAX_OFFERS = 5
+    EXCLUDED_WORDS = ['тильда', 'tilda', 'joomla', 'джумла', 'игра']
+    MAX_OFFERS = 8
 
     def __init__(self, db_path: str = "kwork_projects.db", use_telegram: bool = True):
         self.base_url = "https://kwork.ru"
+        self.db_path = db_path
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
             'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
+            'Connection': 'close',
         }
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
         self.db = DatabaseManager(db_path)
         
         # Инициализация Telegram бота
         self.use_telegram = use_telegram
         self.telegram = None
+        self.offer_listener = None
         if use_telegram:
             self._init_telegram()
     
@@ -55,6 +60,8 @@ class KworkParser:
             # Проверка подключения
             if self.telegram.test_connection():
                 print("✓ Telegram бот подключен")
+                self.offer_listener = OfferListener(self.telegram, self.db_path)
+                self.offer_listener.start()
             else:
                 print("⚠️  Не удалось подключиться к Telegram боту")
                 self.use_telegram = False
@@ -74,26 +81,44 @@ class KworkParser:
             Список словарей с данными о проектах
         """
         url = f"{self.base_url}/projects?c=11&page={page}"
-        
-        try:
-            print(f"\n{'='*60}")
-            print(f"📄 Запрос к URL: {url}")
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
-            
-            print(f"✓ Статус ответа: {response.status_code}")
-            
-            # Извлекаем данные из JavaScript
-            projects = self._extract_projects_from_js(response.text)
-            
-            print(f"✓ Найдено проектов на странице: {len(projects)}")
-            print(f"{'='*60}\n")
-            
-            return projects
-            
-        except requests.RequestException as e:
-            print(f"❌ Ошибка при запросе страницы {page}: {e}")
-            return []
+        max_retries = 3
+
+        print(f"\n{'='*60}")
+        print(f"📄 Запрос к URL: {url}")
+
+        last_err: Optional[Exception] = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.session.get(url, timeout=20)
+                response.raise_for_status()
+
+                print(f"✓ Статус ответа: {response.status_code}")
+
+                projects = self._extract_projects_from_js(response.text)
+
+                print(f"✓ Найдено проектов на странице: {len(projects)}")
+                print(f"{'='*60}\n")
+
+                return projects
+
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_err = e
+                if attempt < max_retries:
+                    wait = 2.0 * attempt
+                    print(f"⚠️  Обрыв соединения (попытка {attempt}/{max_retries}): {e}")
+                    print(f"⏳ Повтор через {wait:.0f} сек...")
+                    # Сбрасываем сессию — keep-alive/прокси иногда ломаются
+                    self.session.close()
+                    self.session = requests.Session()
+                    self.session.headers.update(self.headers)
+                    time.sleep(wait)
+                    continue
+            except requests.RequestException as e:
+                last_err = e
+                break
+
+        print(f"❌ Ошибка при запросе страницы {page}: {last_err}")
+        return []
     
     def _extract_projects_from_js(self, html: str) -> List[Dict]:
         """
@@ -160,10 +185,10 @@ class KworkParser:
             Очищенный словарь с данными проекта
         """
         try:
-            # Kwork has used several names for the proposal counter. Normalize
-            # it once so every consumer applies the same filter.
+            # Число предложений на Kwork — это kwork_count.
+            # views_dirty — просмотры, его нельзя использовать как offers.
             offers_raw = next((data.get(key) for key in (
-                'offers_count', 'offersCount', 'offers', 'offerCount', 'views_dirty'
+                'kwork_count', 'offers_count', 'offersCount', 'offers', 'offerCount'
             ) if data.get(key) is not None), None)
             try:
                 offers_count = int(str(offers_raw).replace(' ', '').replace('\u00a0', ''))
@@ -184,7 +209,7 @@ class KworkParser:
                 'date_create': data.get('date_create', ''),
                 'date_active': data.get('date_active', ''),
                 'date_expire': data.get('date_expire', ''),
-                'kwork_count': data.get('kwork_count', 0),
+                'kwork_count': offers_count if offers_count is not None else data.get('kwork_count', 0),
                 'is_higher_price': data.get('isHigherPrice', False),
             }
             
@@ -333,12 +358,14 @@ class KworkParser:
             send_individual = getattr(config, 'SEND_INDIVIDUAL_PROJECTS', False)
             
             if send_individual:
-                # Отправляем каждый проект отдельным сообщением
+                # Отправляем каждый проект отдельным сообщением + кнопка «Откликнуться»
                 for project in projects:
+                    if self.offer_listener:
+                        self.offer_listener.cache_project(project)
                     self.telegram.send_project(project)
                     time.sleep(0.5)  # Небольшая задержка
             else:
-                # Отправляем пакетами
+                # Отправляем пакетами (без кнопки отклика — нужны отдельные сообщения)
                 batch_size = getattr(config, 'PROJECTS_PER_MESSAGE', 5)
                 self.telegram.send_projects_batch(projects, batch_size)
                 
@@ -450,6 +477,8 @@ def main():
                 print(f"✅ Всего запусков: {run_count}")
                 print(f"📊 Работа завершена корректно")
                 print("="*60 + "\n")
+                if parser.offer_listener:
+                    parser.offer_listener.stop()
                 break
                 
             except Exception as e:
@@ -458,7 +487,7 @@ def main():
                 time.sleep(interval_minutes * 60)
     
     else:
-        # Режим одноразового запуска
+        # Режим одноразового запуска: парсим, затем ждём кнопки отклика
         print(f"\n▶️  РЕЖИМ: Одноразовый запуск")
         print(f"📄 Страницы: {start_page} - {end_page}")
         print("="*60 + "\n")
@@ -479,6 +508,15 @@ def main():
         print(f"💾 Всего проектов в БД: {stats['db_total_projects']}")
         print(f"👥 Всего покупателей в БД: {stats['db_total_buyers']}")
         print("="*60)
+
+        if parser.offer_listener:
+            print("\n⏳ Слушатель кнопок активен. Ctrl+C — выход.\n")
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\n⛔ Остановка")
+                parser.offer_listener.stop()
 
 
 if __name__ == "__main__":

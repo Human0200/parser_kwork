@@ -5,3 +5,4 @@ venv/
 *.pyc
 config.py
 .env
+debug_screens/

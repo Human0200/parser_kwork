@@ -1,10 +1,14 @@
 import requests
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import time
+import json
 
 
 class TelegramBot:
     """Класс для работы с Telegram Bot API"""
+
+    _MAX_RETRIES = 3
+    _RETRY_DELAY = 1.5
     
     def __init__(self, bot_token: str, chat_id: str):
         """
@@ -15,16 +19,55 @@ class TelegramBot:
             chat_id: ID чата для отправки сообщений
         """
         self.bot_token = bot_token
-        self.chat_id = chat_id
+        self.chat_id = str(chat_id)
         self.base_url = f"https://api.telegram.org/bot{bot_token}"
+        self._session = requests.Session()
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        label: str,
+        **kwargs: Any,
+    ) -> Optional[requests.Response]:
+        """POST/GET с ретраями на обрыв соединения / таймаут."""
+        kwargs.setdefault("timeout", 15)
+        last_err: Optional[Exception] = None
+        for attempt in range(1, self._MAX_RETRIES + 1):
+            try:
+                if method.upper() == "GET":
+                    response = self._session.get(url, **kwargs)
+                else:
+                    response = self._session.post(url, **kwargs)
+                response.raise_for_status()
+                return response
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_err = e
+                if attempt < self._MAX_RETRIES:
+                    time.sleep(self._RETRY_DELAY * attempt)
+                    continue
+            except requests.RequestException as e:
+                last_err = e
+                break
+        print(f"❌ Ошибка {label}: {last_err}")
+        return None
     
-    def send_message(self, text: str, parse_mode: str = "HTML") -> bool:
+    def send_message(
+        self,
+        text: str,
+        parse_mode: str = "HTML",
+        reply_markup: Optional[Dict] = None,
+        chat_id: Optional[str] = None,
+    ) -> bool:
         """
         Отправка текстового сообщения
         
         Args:
             text: текст сообщения
             parse_mode: режим форматирования (HTML или Markdown)
+            reply_markup: inline/reply клавиатура
+            chat_id: чат (по умолчанию из конфига)
             
         Returns:
             True если успешно, False иначе
@@ -32,24 +75,22 @@ class TelegramBot:
         url = f"{self.base_url}/sendMessage"
         
         # Telegram ограничивает длину сообщения в 4096 символов
-        if len(text) > 4096:
+        if len(text) > 4096 and reply_markup is None:
             # Разбиваем на части
             return self._send_long_message(text, parse_mode)
         
-        payload = {
-            'chat_id': self.chat_id,
-            'text': text,
+        payload: Dict[str, Any] = {
+            'chat_id': chat_id or self.chat_id,
+            'text': text[:4096],
             'parse_mode': parse_mode,
             'disable_web_page_preview': True
         }
+        if reply_markup is not None:
+            payload['reply_markup'] = reply_markup
         
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
-            return True
-        except requests.RequestException as e:
-            print(f"❌ Ошибка отправки сообщения в Telegram: {e}")
-            return False
+        return self._request(
+            "POST", url, label="отправки сообщения в Telegram", json=payload
+        ) is not None
     
     def _send_long_message(self, text: str, parse_mode: str) -> bool:
         """
@@ -91,7 +132,7 @@ class TelegramBot:
     
     def send_project(self, project: Dict) -> bool:
         """
-        Отправка информации о проекте
+        Отправка информации о проекте с кнопкой «Откликнуться»
         
         Args:
             project: словарь с данными о проекте
@@ -100,7 +141,23 @@ class TelegramBot:
             True если успешно
         """
         message = self._format_project_message(project)
-        return self.send_message(message)
+        project_id = project.get('id')
+        reply_markup = None
+        if project_id:
+            reply_markup = {
+                "inline_keyboard": [
+                    [
+                        {"text": "Автоотклик", "callback_data": f"offer_auto:{project_id}"},
+                        {"text": "Свой отклик", "callback_data": f"offer_custom:{project_id}"},
+                    ],
+                ]
+            }
+        ok = self.send_message(message, reply_markup=reply_markup)
+        if ok:
+            print(f"✓ Telegram: проект {project_id} отправлен")
+        else:
+            print(f"❌ Telegram: не удалось отправить проект {project_id}")
+        return ok
     
     def send_projects_batch(self, projects: List[Dict], batch_size: int = 5) -> int:
         """
@@ -130,6 +187,52 @@ class TelegramBot:
                 time.sleep(1)
         
         return sent_count
+    
+    def get_updates(self, offset: int = 0, timeout: int = 25) -> List[Dict]:
+        """Long polling обновлений Telegram."""
+        url = f"{self.base_url}/getUpdates"
+        response = self._request(
+            "GET",
+            url,
+            label="getUpdates",
+            params={
+                "offset": offset,
+                "timeout": timeout,
+                "allowed_updates": json.dumps(["callback_query", "message"]),
+            },
+            timeout=timeout + 10,
+        )
+        if response is None:
+            return []
+        data = response.json()
+        if data.get("ok"):
+            return data.get("result", [])
+        return []
+
+    def answer_callback_query(self, callback_query_id: str, text: str = "", show_alert: bool = False) -> bool:
+        url = f"{self.base_url}/answerCallbackQuery"
+        return self._request(
+            "POST",
+            url,
+            label="answerCallbackQuery",
+            json={"callback_query_id": callback_query_id, "text": text, "show_alert": show_alert},
+        ) is not None
+
+    def edit_message_reply_markup(
+        self,
+        chat_id: str,
+        message_id: int,
+        reply_markup: Optional[Dict] = None,
+    ) -> bool:
+        url = f"{self.base_url}/editMessageReplyMarkup"
+        payload: Dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        else:
+            payload["reply_markup"] = {"inline_keyboard": []}
+        return self._request(
+            "POST", url, label="editMessageReplyMarkup", json=payload
+        ) is not None
     
     def _format_project_message(self, project: Dict) -> str:
         """
@@ -236,21 +339,14 @@ class TelegramBot:
             True если подключение успешно
         """
         url = f"{self.base_url}/getMe"
-        
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get('ok'):
-                bot_info = data.get('result', {})
-                bot_name = bot_info.get('first_name', 'Unknown')
-                print(f"✓ Подключение к боту успешно: @{bot_info.get('username', bot_name)}")
-                return True
-            else:
-                print(f"❌ Ошибка бота: {data.get('description', 'Unknown error')}")
-                return False
-                
-        except requests.RequestException as e:
-            print(f"❌ Ошибка подключения к Telegram: {e}")
+        response = self._request("GET", url, label="подключения к Telegram")
+        if response is None:
             return False
+        data = response.json()
+        if data.get('ok'):
+            bot_info = data.get('result', {})
+            bot_name = bot_info.get('first_name', 'Unknown')
+            print(f"✓ Подключение к боту успешно: @{bot_info.get('username', bot_name)}")
+            return True
+        print(f"❌ Ошибка бота: {data.get('description', 'Unknown error')}")
+        return False

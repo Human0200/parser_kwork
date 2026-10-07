@@ -27,11 +27,20 @@ def _csv(name: str) -> list[str]:
 
 
 def _price(value: Any) -> int | None:
-    """Parse the smallest numeric amount from Kwork price text."""
+    """Parse the largest numeric amount from Kwork price text."""
     if value is None:
         return None
-    nums = [int(x.replace(" ", "").replace("\u00a0", "")) for x in re.findall(r"\d[\d\s\u00a0]*", str(value))]
-    return min(nums) if nums else None
+    text = str(value).replace("\u00a0", " ")
+    nums: list[int] = []
+    for match in re.finditer(r"\d+(?:\s\d{3})*(?:[.,]\d+)?", text):
+        raw = match.group(0).replace(" ", "").replace(",", ".")
+        try:
+            amount = int(float(raw))
+        except ValueError:
+            continue
+        if amount > 0:
+            nums.append(amount)
+    return max(nums) if nums else None
 
 
 class Store:
@@ -77,7 +86,7 @@ CFG = {
     "login": os.getenv("KWORK_LOGIN", ""),
     "password": os.getenv("KWORK_PASSWORD", ""),
 }
-MAX_OFFERS = 5
+MAX_OFFERS = 8
 store = Store(CFG["db"])
 mcp = FastMCP("kwork-response-assistant")
 
@@ -183,12 +192,15 @@ async def scan_projects(page: int = 1) -> str:
         if not sphere:
             continue
         source = f"{p.get('price_limit', '')} {p.get('possible_price_limit', '')}"
-        minimum = _price(source)
-        maximums = [int(x.replace(" ", "").replace("\u00a0", "")) for x in re.findall(r"\d[\d\s\u00a0]*", source)]
-        maximum = max(maximums) if len(maximums) > 1 else minimum
+        maximum = _price(source)
+        # min для журнала — отдельно, без нулей из дробной части
+        parts = [int(float(x.replace(" ", "").replace(",", ".")))
+                 for x in re.findall(r"\d+(?:\s\d{3})*(?:[.,]\d+)?", source.replace("\u00a0", " "))
+                 if float(x.replace(" ", "").replace(",", ".")) > 0]
+        minimum = min(parts) if parts else maximum
         draft = _draft(p, sphere, skills)
         row = {"project_id": pid, "name": p.get("name", ""), "sphere": sphere, "min_price": minimum,
-               "max_price": maximum, "sent_price": minimum, "response": draft,
+               "max_price": maximum, "sent_price": maximum, "response": draft,
                "created_at": datetime.now(timezone.utc).isoformat(), "status": "draft"}
         store.save(row)
         result.append(row)
