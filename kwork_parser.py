@@ -362,7 +362,15 @@ class KworkParser:
                 for project in projects:
                     if self.offer_listener:
                         self.offer_listener.cache_project(project)
-                    self.telegram.send_project(project)
+                    html = self.telegram._format_project_message(project)
+                    msg_id = self.telegram.send_project(project)
+                    if self.offer_listener and msg_id and project.get("id") is not None:
+                        self.offer_listener.remember_announcement(
+                            project["id"],
+                            self.telegram.chat_id,
+                            msg_id,
+                            html,
+                        )
                     time.sleep(0.5)  # Небольшая задержка
             else:
                 # Отправляем пакетами (без кнопки отклика — нужны отдельные сообщения)

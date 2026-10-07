@@ -1,7 +1,6 @@
 """Обработка кнопок «Автоотклик» / «Свой отклик» в Telegram."""
 from __future__ import annotations
 
-import os
 import re
 import sqlite3
 import threading
@@ -13,7 +12,9 @@ from offer_automation import (
     build_response_text,
     project_budget_bounds,
     project_max_price,
+    project_min_offer_price,
     project_offer_price,
+    project_price_presets,
     submit_offer,
 )
 from telegram_bot import TelegramBot
@@ -21,16 +22,6 @@ from telegram_bot import TelegramBot
 DEADLINE_CHOICES = (1, 2, 3, 5, 7, 10, 14)
 DESC_MIN_LEN = 150
 DESC_MAX_LEN = 2000
-DEFAULT_AUTO_DEADLINE = 7
-
-
-def _auto_deadline_days() -> int:
-    raw = os.getenv("KWORK_DEFAULT_DEADLINE", "").strip()
-    if raw.isdigit():
-        days = int(raw)
-        if 1 <= days <= 90:
-            return days
-    return DEFAULT_AUTO_DEADLINE
 
 
 class OfferListener:
@@ -44,11 +35,95 @@ class OfferListener:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.project_cache: Dict[str, Dict[str, Any]] = {}
+        # project_id -> {chat_id, message_id, html}
+        self.announcements: Dict[str, Dict[str, Any]] = {}
 
     def cache_project(self, project: Dict[str, Any]) -> None:
         pid = project.get("id")
         if pid is not None:
             self.project_cache[str(pid)] = project
+
+    def remember_announcement(
+        self,
+        project_id: str | int,
+        chat_id: str,
+        message_id: int,
+        html_text: str = "",
+    ) -> None:
+        self.announcements[str(project_id)] = {
+            "chat_id": str(chat_id),
+            "message_id": int(message_id),
+            "html": html_text or "",
+        }
+
+    def _announcement_ref(
+        self, project_id: str, state: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        if state:
+            mid = state.get("announce_message_id")
+            cid = state.get("announce_chat_id")
+            if mid and cid:
+                return {
+                    "chat_id": str(cid),
+                    "message_id": int(mid),
+                    "html": state.get("announce_html")
+                    or (self.announcements.get(str(project_id)) or {}).get("html", ""),
+                }
+        return self.announcements.get(str(project_id))
+
+    def _mark_announcement_done(self, project_id: str, state: Optional[Dict[str, Any]] = None) -> None:
+        """Убирает кнопки у объявления и ставит галочку об успешном отклике."""
+        ref = self._announcement_ref(project_id, state)
+        if not ref:
+            return
+        html = (ref.get("html") or "").strip()
+        if html.lstrip().startswith("✅"):
+            body = html
+        elif html:
+            body = f"✅ <b>Отклик отправлен</b>\n\n{html}"
+        else:
+            body = "✅ <b>Отклик отправлен</b>"
+        self.bot.edit_message_text(
+            ref["chat_id"],
+            ref["message_id"],
+            body,
+            reply_markup={"inline_keyboard": []},
+        )
+        self.announcements[str(project_id)] = {**ref, "html": body}
+
+    def _restore_announcement_buttons(
+        self, project_id: str, state: Optional[Dict[str, Any]] = None
+    ) -> None:
+        ref = self._announcement_ref(project_id, state)
+        if not ref:
+            return
+        self.bot.edit_message_reply_markup(
+            ref["chat_id"],
+            ref["message_id"],
+            self.bot.offer_buttons(project_id),
+        )
+
+    def _bind_announcement_from_callback(
+        self, state: Dict[str, Any], project_id: str, cq: Dict[str, Any]
+    ) -> None:
+        msg = cq.get("message") or {}
+        mid = msg.get("message_id")
+        chat_id = str((msg.get("chat") or {}).get("id") or "")
+        if not mid or not chat_id:
+            return
+        state["announce_message_id"] = int(mid)
+        state["announce_chat_id"] = chat_id
+        cached = self.announcements.get(str(project_id)) or {}
+        html = cached.get("html") or ""
+        if not html:
+            # fallback: plain text из Telegram (без HTML-разметки)
+            plain = (msg.get("text") or "").strip()
+            if plain and not plain.startswith("✅"):
+                html = self.bot._escape_html(plain)
+        state["announce_html"] = html
+        self.remember_announcement(project_id, chat_id, int(mid), html)
+        # на время сценария убираем кнопки, чтобы не жали повторно
+        self.bot.edit_message_reply_markup(chat_id, int(mid), {"inline_keyboard": []})
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -90,20 +165,9 @@ class OfferListener:
         row2.append({"text": "Другое", "callback_data": f"deadline_custom:{project_id}"})
         return {"inline_keyboard": [row1, row2]}
 
-    def _price_keyboard(self, project_id: str, suggested: Optional[int]) -> Dict[str, Any]:
-        presets: list[int] = []
-        if suggested and suggested > 0:
-            for p in (
-                max(500, suggested // 3),
-                max(500, suggested // 2),
-                max(500, int(suggested * 0.7)),
-                suggested,
-            ):
-                presets.append(int(p))
-        for p in (1000, 2000, 3000, 5000, 7000, 10000, 15000, 20000, 30000):
-            if not suggested or p <= int(suggested * 1.5):
-                presets.append(p)
-        prices = sorted({p for p in presets if p > 0})[:8]
+    def _price_keyboard(self, project_id: str, project: Dict[str, Any]) -> Dict[str, Any]:
+        """Кнопки цены: от (−20% минимума бюджета) до максимума."""
+        prices = project_price_presets(project)
         rows: list[list[Dict[str, str]]] = []
         row: list[Dict[str, str]] = []
         for price in prices:
@@ -139,7 +203,12 @@ class OfferListener:
             f"Генерирую описание ИИ для: <b>{self.bot._escape_html(str(name))}</b>…",
             chat_id=chat_id,
         )
-        ai = generate_offer_description(str(name), project.get("description", "") or "")
+        ai = generate_offer_description(
+            str(name),
+            project.get("description", "") or "",
+            price=int(price) if price else None,
+            days=int(days) if days else None,
+        )
         if not ai.get("ok"):
             state["awaiting"] = "custom_description"
             state["ai_description"] = None
@@ -191,14 +260,16 @@ class OfferListener:
             return
 
         if data == "offer_cancel":
-            self.pending.pop(chat_id, None)
+            state = self.pending.pop(chat_id, None)
             self.bot.answer_callback_query(cq_id, "Отменено")
             if message_id:
                 self.bot.edit_message_reply_markup(chat_id, message_id, None)
+            if state and state.get("project_id"):
+                self._restore_announcement_buttons(str(state["project_id"]), state)
             self.bot.send_message("Отклик отменён.", chat_id=chat_id)
             return
 
-        # --- Автоотклик (и старая кнопка offer:) ---
+        # --- Автоотклик: цена авто → выбор срока → шаблон ---
         auto_match = re.match(r"^offer_auto:(\d+)$", data) or re.match(r"^offer:(\d+)$", data)
         if auto_match:
             project_id = auto_match.group(1)
@@ -210,30 +281,31 @@ class OfferListener:
             if not price or price <= 0:
                 self.bot.answer_callback_query(cq_id, "Не удалось определить цену", show_alert=True)
                 return
-            days = _auto_deadline_days()
-            self.pending[chat_id] = {
+            state = {
                 "project_id": project_id,
                 "project": project,
                 "price": price,
-                "days": days,
+                "days": None,
                 "mode": "auto",
+                "awaiting": "deadline",
                 "custom_description": None,
             }
+            self._bind_announcement_from_callback(state, project_id, cq)
+            self.pending[chat_id] = state
             low, high = project_budget_bounds(project)
             budget_hint = ""
             if low and high and low != high:
                 budget_hint = f" (среднее из {low}–{high})"
             self.bot.answer_callback_query(cq_id, "Автоотклик")
-            if message_id:
-                self.bot.edit_message_reply_markup(chat_id, message_id, None)
+            name = project.get("name", project_id)
             self.bot.send_message(
-                f"Автоотклик: <b>{self.bot._escape_html(str(project.get('name', project_id)))}</b>\n"
+                f"Автоотклик: <b>{self.bot._escape_html(str(name))}</b>\n"
                 f"Цена: <b>{price}</b> ₽{budget_hint}\n"
-                f"Срок: <b>{days}</b> дн.\n"
-                f"Текст: шаблон",
+                f"Текст: шаблон\n\n"
+                f"Выберите срок выполнения:",
                 chat_id=chat_id,
+                reply_markup=self._deadline_keyboard(project_id),
             )
-            self._submit(chat_id, project_id, days)
             return
 
         # --- Свой отклик: цена → срок → описание ---
@@ -244,8 +316,9 @@ class OfferListener:
             if not project:
                 self.bot.answer_callback_query(cq_id, "Проект не найден в БД", show_alert=True)
                 return
-            suggested = project_max_price(project) or project_offer_price(project)
-            self.pending[chat_id] = {
+            low, high = project_budget_bounds(project)
+            floor = project_min_offer_price(project)
+            state = {
                 "project_id": project_id,
                 "project": project,
                 "price": None,
@@ -254,14 +327,24 @@ class OfferListener:
                 "awaiting": "custom_price",
                 "custom_description": None,
             }
+            self._bind_announcement_from_callback(state, project_id, cq)
+            self.pending[chat_id] = state
             self.bot.answer_callback_query(cq_id, "Свой отклик")
             name = project.get("name", project_id)
-            hint = f"\nВ объявлении до <b>{suggested}</b> ₽." if suggested else ""
+            if floor and high:
+                hint = (
+                    f"\nБюджет: <b>{low or floor}</b>–<b>{high}</b> ₽"
+                    f"\nКнопки: от <b>{floor}</b> (−20%) до <b>{high}</b> ₽."
+                )
+            elif high:
+                hint = f"\nВ объявлении до <b>{high}</b> ₽."
+            else:
+                hint = ""
             self.bot.send_message(
                 f"Свой отклик: <b>{self.bot._escape_html(str(name))}</b>{hint}\n\n"
                 f"1/3 — выберите цену:",
                 chat_id=chat_id,
-                reply_markup=self._price_keyboard(project_id, suggested),
+                reply_markup=self._price_keyboard(project_id, project),
             )
             return
 
@@ -330,7 +413,7 @@ class OfferListener:
             state = self.pending.get(chat_id)
             if not state or state.get("project_id") != project_id:
                 self.bot.answer_callback_query(
-                    cq_id, "Сессия устарела, нажмите «Свой отклик» снова", show_alert=True
+                    cq_id, "Сессия устарела, нажмите отклик снова", show_alert=True
                 )
                 return
             state["awaiting"] = "deadline_text"
@@ -355,11 +438,17 @@ class OfferListener:
                 self.bot.edit_message_reply_markup(chat_id, message_id, None)
 
             state["days"] = days
+            state["awaiting"] = None
+            self.pending[chat_id] = state
             if state.get("mode") == "custom":
-                self.pending[chat_id] = state
                 self.bot.send_message("3/3 — описание:", chat_id=chat_id)
                 self._start_description_step(chat_id, project_id, state)
             else:
+                # автоотклик: цена уже есть, текст — шаблон
+                self.bot.send_message(
+                    f"Срок: <b>{days}</b> дн. Отправляем отклик…",
+                    chat_id=chat_id,
+                )
                 self._submit(chat_id, project_id, days)
             return
 
@@ -421,7 +510,9 @@ class OfferListener:
             return
 
         if text.lower() in {"/cancel", "отмена", "cancel"}:
-            self.pending.pop(chat_id, None)
+            cancelled = self.pending.pop(chat_id, None)
+            if cancelled and cancelled.get("project_id"):
+                self._restore_announcement_buttons(str(cancelled["project_id"]), cancelled)
             self.bot.send_message("Отклик отменён.", chat_id=chat_id)
             return
 
@@ -465,11 +556,17 @@ class OfferListener:
                 self.bot.send_message("Срок должен быть от 1 до 90 дней.", chat_id=chat_id)
                 return
             state["days"] = days
+            state["awaiting"] = None
             project_id = state["project_id"]
+            self.pending[chat_id] = state
             if state.get("mode") == "custom":
                 self.bot.send_message("3/3 — описание:", chat_id=chat_id)
                 self._start_description_step(chat_id, project_id, state)
             else:
+                self.bot.send_message(
+                    f"Срок: <b>{days}</b> дн. Отправляем отклик…",
+                    chat_id=chat_id,
+                )
                 self._submit(chat_id, project_id, days)
             return
 
@@ -502,6 +599,7 @@ class OfferListener:
         project = (state or {}).get("project") or self._load_project(project_id)
         if not project:
             self.bot.send_message("Проект не найден.", chat_id=chat_id)
+            self._restore_announcement_buttons(project_id, state)
             return
 
         price = (state or {}).get("price") or project_offer_price(project)
@@ -510,6 +608,7 @@ class OfferListener:
                 "Не удалось определить цену проекта. Отклик не отправлен.",
                 chat_id=chat_id,
             )
+            self._restore_announcement_buttons(project_id, state)
             return
 
         max_price = project_max_price(project)
@@ -518,6 +617,7 @@ class OfferListener:
                 f"Цена {price} ₽ выше лимита объявления ({max_price} ₽). Отклик не отправлен.",
                 chat_id=chat_id,
             )
+            self._restore_announcement_buttons(project_id, state)
             return
 
         custom_description = (state or {}).get("custom_description")
@@ -545,8 +645,9 @@ class OfferListener:
             order_name=project.get("name", "") or f"Проект {project_id}",
         )
         if result.get("ok"):
+            self._mark_announcement_done(project_id, state)
             self.bot.send_message(
-                f"Отклик отправлен.\n"
+                f"✅ Отклик отправлен.\n"
                 f"Проект: {project_id}\n"
                 f"Цена: {price} ₽\n"
                 f"Срок: {days} дн.\n"
@@ -555,6 +656,7 @@ class OfferListener:
                 chat_id=chat_id,
             )
         else:
+            self._restore_announcement_buttons(project_id, state)
             self.bot.send_message(
                 f"Не удалось отправить отклик.\n"
                 f"Ошибка: {self.bot._escape_html(str(result.get('error', 'unknown')))}",

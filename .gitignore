@@ -2,6 +2,7 @@ venv/
 *.html
 *.db
 *.json
+!portfolio_cases.json
 *.pyc
 config.py
 .env

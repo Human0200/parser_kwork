@@ -8,15 +8,15 @@
 WordPress, 1С-Битрикс и собственная разработка.
 
 Примеры:
-https://promolodost.shop/
-https://climbox.ru/
-https://3d-group.space/
-https://daigo.ru/
-https://hypower.ru/
-https://podocentr.by/
-https://legionural.ru/
-https://td-pv.ru/
-https://opalubka.market/
+https://promolodost.shop/ //онлайн магазин косметики
+https://climbox.ru/  // Магазин климатического оборудования
+https://3d-group.space/ // сайт услуг разработки crm и сайтов
+https://daigo.ru/ //продажа продуктов здоровья и долголетия
+https://hypower.ru/ // сайт по продаже лазерного оборудования и всякого такого
+https://podocentr.by/ //подологический центр
+https://legionural.ru/ // сайт производства металоконструкций
+https://td-pv.ru/ //сайт Тепломаш
+https://opalubka.market/ // строительные леса и всякие такое
 
 Одни из крупнейших наших проектов:
 
@@ -25,14 +25,12 @@ LOGEA CRM — полноценная CRM: компании, контакты, о
 DayCargo — система автоматизации заказов на перевозки: боты, backend, БД, бизнес-логика и обработка заказов.
 
 Telegram-боты:
-@matchmacth_crm_bot
-@shtraf_osporit_bot
-@parser_kwork_dev_bot
-@patternhub_bot
-@Daycargo_loader_makeorder_bot
-@vpn1_support_bot
-@dl_assessors_bot
-@geotracker_telegram_bot
+@textinvoiced_bot //озвучка текста
+@patternhub_bot // каталог для магазина
+@geotracker_telegram_bot // геотрекер
+@ref_generate_bot // генерация изображений
+@AutoParseAlertBot // Парсер каналов
+@inseyet_bot //Анализирует сообщения пользователя и устанавливает его интересы
 
 MAX-боты:
 https://max.ru/id183210316680_bot
@@ -49,7 +47,7 @@ https://github.com/Human0200/parser_kwork
 
 Есть опыт работы в крупных IT-компаниях и проектах: CKASSA, IBS, LeadSpace. Высшее образование по IT-направлению.
 
-Стек: Python, PHP, React, PostgreSQL, Docker, REST API, Bitrix24.
+Стек: Python, PHP, React, PostgreSQL, Docker, REST API, Bitrix24, Docker, Vue.
 
 Предоставляем 14 дней технической поддержки. Готовы предложить оптимальный вариант реализации по срокам и стоимости.
 

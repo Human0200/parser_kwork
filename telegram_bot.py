@@ -59,89 +59,74 @@ class TelegramBot:
         parse_mode: str = "HTML",
         reply_markup: Optional[Dict] = None,
         chat_id: Optional[str] = None,
-    ) -> bool:
+    ) -> Optional[int]:
         """
-        Отправка текстового сообщения
-        
-        Args:
-            text: текст сообщения
-            parse_mode: режим форматирования (HTML или Markdown)
-            reply_markup: inline/reply клавиатура
-            chat_id: чат (по умолчанию из конфига)
-            
+        Отправка текстового сообщения.
+
         Returns:
-            True если успешно, False иначе
+            message_id при успехе, иначе None
         """
         url = f"{self.base_url}/sendMessage"
-        
+
         # Telegram ограничивает длину сообщения в 4096 символов
         if len(text) > 4096 and reply_markup is None:
-            # Разбиваем на части
             return self._send_long_message(text, parse_mode)
-        
+
         payload: Dict[str, Any] = {
-            'chat_id': chat_id or self.chat_id,
-            'text': text[:4096],
-            'parse_mode': parse_mode,
-            'disable_web_page_preview': True
+            "chat_id": chat_id or self.chat_id,
+            "text": text[:4096],
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": True,
         }
         if reply_markup is not None:
-            payload['reply_markup'] = reply_markup
-        
-        return self._request(
+            payload["reply_markup"] = reply_markup
+
+        resp = self._request(
             "POST", url, label="отправки сообщения в Telegram", json=payload
-        ) is not None
-    
-    def _send_long_message(self, text: str, parse_mode: str) -> bool:
-        """
-        Отправка длинного сообщения частями
-        
-        Args:
-            text: текст сообщения
-            parse_mode: режим форматирования
-            
-        Returns:
-            True если все части отправлены успешно
-        """
+        )
+        if resp is None:
+            return None
+        try:
+            data = resp.json()
+            return int(data["result"]["message_id"])
+        except (ValueError, KeyError, TypeError):
+            return None
+
+    def _send_long_message(self, text: str, parse_mode: str) -> Optional[int]:
+        """Отправка длинного сообщения частями; возвращает id последней части."""
         max_length = 4000  # Оставляем запас
         parts = []
-        
-        # Разбиваем текст на части
+
         while text:
             if len(text) <= max_length:
                 parts.append(text)
                 break
-            
-            # Ищем последний перенос строки в пределах max_length
-            split_pos = text.rfind('\n', 0, max_length)
+
+            split_pos = text.rfind("\n", 0, max_length)
             if split_pos == -1:
                 split_pos = max_length
-            
+
             parts.append(text[:split_pos])
             text = text[split_pos:].lstrip()
-        
-        # Отправляем части
+
+        last_id: Optional[int] = None
         for i, part in enumerate(parts):
             if i > 0:
-                time.sleep(1)  # Задержка между сообщениями
-            
-            if not self.send_message(part, parse_mode):
-                return False
-        
-        return True
-    
-    def send_project(self, project: Dict) -> bool:
+                time.sleep(1)
+            last_id = self.send_message(part, parse_mode)
+            if last_id is None:
+                return None
+        return last_id
+
+    def send_project(self, project: Dict) -> Optional[int]:
         """
-        Отправка информации о проекте с кнопкой «Откликнуться»
-        
-        Args:
-            project: словарь с данными о проекте
-            
+        Отправка информации о проекте с кнопками отклика.
+
         Returns:
-            True если успешно
+            message_id при успехе, иначе None
         """
         message = self._format_project_message(project)
-        project_id = project.get('id')
+        project_id = project.get("id")
         reply_markup = None
         if project_id:
             reply_markup = {
@@ -152,12 +137,47 @@ class TelegramBot:
                     ],
                 ]
             }
-        ok = self.send_message(message, reply_markup=reply_markup)
-        if ok:
+        msg_id = self.send_message(message, reply_markup=reply_markup)
+        if msg_id:
             print(f"✓ Telegram: проект {project_id} отправлен")
         else:
             print(f"❌ Telegram: не удалось отправить проект {project_id}")
-        return ok
+        return msg_id
+
+    def offer_buttons(self, project_id: str | int) -> Dict[str, Any]:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "Автоотклик", "callback_data": f"offer_auto:{project_id}"},
+                    {"text": "Свой отклик", "callback_data": f"offer_custom:{project_id}"},
+                ],
+            ]
+        }
+
+    def edit_message_text(
+        self,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        *,
+        parse_mode: str = "HTML",
+        reply_markup: Optional[Dict] = None,
+    ) -> bool:
+        url = f"{self.base_url}/editMessageText"
+        payload: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text[:4096],
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": True,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        else:
+            payload["reply_markup"] = {"inline_keyboard": []}
+        return (
+            self._request("POST", url, label="editMessageText", json=payload) is not None
+        )
     
     def send_projects_batch(self, projects: List[Dict], batch_size: int = 5) -> int:
         """

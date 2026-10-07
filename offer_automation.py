@@ -18,7 +18,9 @@ def _price_numbers(value: Any) -> list[int]:
         return []
     text = str(value).replace("\u00a0", " ")
     nums: list[int] = []
-    for match in re.finditer(r"\d+(?:\s\d{3})*(?:[.,]\d+)?", text):
+    # «1 000 000» / «60000.00» / «500-1500» — без склейки «500 1500» → 500150
+    pattern = r"\d{1,3}(?:\s\d{3})+(?!\d)(?:[.,]\d+)?|\d+(?:[.,]\d+)?"
+    for match in re.finditer(pattern, text):
         raw = match.group(0).replace(" ", "").replace(",", ".")
         try:
             amount = int(float(raw))
@@ -37,8 +39,8 @@ def _parse_price(value: Any) -> int | None:
 
 def project_budget_bounds(project: dict[str, Any]) -> tuple[int | None, int | None]:
     """(min, max) бюджета объявления."""
-    nums = _price_numbers(
-        f"{project.get('price_limit') or ''} {project.get('possible_price_limit') or ''}"
+    nums = _price_numbers(project.get("price_limit")) + _price_numbers(
+        project.get("possible_price_limit")
     )
     if not nums:
         return None, None
@@ -61,6 +63,44 @@ def project_max_price(project: dict[str, Any]) -> int | None:
     return high
 
 
+def project_min_offer_price(project: dict[str, Any]) -> int | None:
+    """Нижняя цена для кнопок: −20% от минимума бюджета объявления."""
+    low, high = project_budget_bounds(project)
+    if low is None and high is None:
+        return None
+    base = low if low is not None else high
+    assert base is not None
+    floor = int(base * 0.8)
+    if high is not None:
+        floor = min(floor, high)
+    return max(500, floor)
+
+
+PRICE_PRESET_PARTS = 6  # равных отрезков от (−20% min) до max
+
+
+def project_price_presets(project: dict[str, Any], *, parts: int = PRICE_PRESET_PARTS) -> list[int]:
+    """Пресеты: от (min×0.8) до max, ровно `parts` равных шагов (parts+1 значений)."""
+    low, high = project_budget_bounds(project)
+    if low is None and high is None:
+        return [1000, 2000, 3000, 5000, 7000, 10000]
+
+    high_v = high if high is not None else low
+    low_v = low if low is not None else high
+    assert high_v is not None and low_v is not None
+
+    floor = project_min_offer_price(project) or max(500, int(low_v * 0.8))
+    ceil = high_v
+    if floor > ceil:
+        floor = ceil
+    if floor == ceil:
+        return [floor]
+
+    n = max(1, int(parts))
+    # i = 0..n → n+1 точек с равным шагом
+    return [floor + (ceil - floor) * i // n for i in range(n + 1)]
+
+
 def build_response_text(project_name: str, description: str = "") -> str:
     template_file = os.getenv("KWORK_RESPONSE_TEMPLATE_FILE", "response_template.txt")
     template = ""
@@ -75,13 +115,27 @@ def build_response_text(project_name: str, description: str = "") -> str:
     about = os.getenv("KWORK_ABOUT", "Команда FlowTeam")
     details = "Учту требования из ТЗ и предложу согласовать детали перед стартом."
     try:
-        return template.format(
+        text = template.format(
             project_name=project_name or "",
             details=details,
             about=about,
         )
     except (KeyError, ValueError):
-        return template
+        text = template
+    try:
+        from ai_description import format_portfolio_for_prompt
+
+        portfolio = format_portfolio_for_prompt()
+        if portfolio and "promolodost.shop" not in text and "@ref_generate_bot" not in text:
+            # вставить кейсы перед подписью
+            sig = re.search(r"\n\s*С уважением\s*,?", text, flags=re.I)
+            if sig:
+                text = text[: sig.start()].rstrip() + "\n\n" + portfolio + text[sig.start() :]
+            else:
+                text = text.rstrip() + "\n\n" + portfolio
+    except Exception:
+        pass
+    return text
 
 
 def _storage_state_path() -> Path:

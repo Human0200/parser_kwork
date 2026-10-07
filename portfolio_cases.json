@@ -1,0 +1,122 @@
+{
+  "websites": [
+    {
+      "url": "https://promolodost.shop/",
+      "description": "онлайн магазин косметики",
+      "topics": ["shop", "website"]
+    },
+    {
+      "url": "https://climbox.ru/",
+      "description": "магазин климатического оборудования",
+      "topics": ["shop", "website"]
+    },
+    {
+      "url": "https://3d-group.space/",
+      "description": "сайт услуг разработки CRM и сайтов",
+      "topics": ["crm", "website"]
+    },
+    {
+      "url": "https://daigo.ru/",
+      "description": "продажа продуктов здоровья и долголетия",
+      "topics": ["shop", "website"]
+    },
+    {
+      "url": "https://hypower.ru/",
+      "description": "продажа лазерного оборудования",
+      "topics": ["shop", "website"]
+    },
+    {
+      "url": "https://podocentr.by/",
+      "description": "подологический центр",
+      "topics": ["website"]
+    },
+    {
+      "url": "https://legionural.ru/",
+      "description": "производство металлоконструкций",
+      "topics": ["website"]
+    },
+    {
+      "url": "https://td-pv.ru/",
+      "description": "сайт Тепломаш",
+      "topics": ["website"]
+    },
+    {
+      "url": "https://opalubka.market/",
+      "description": "строительные леса и оборудование",
+      "topics": ["shop", "website"]
+    }
+  ],
+  "telegram_bots": [
+    {
+      "url": "@textinvoiced_bot",
+      "description": "озвучка текста",
+      "topics": ["voice", "telegram", "bot_generic"]
+    },
+    {
+      "url": "@patternhub_bot",
+      "description": "каталог для магазина",
+      "topics": ["shop", "telegram", "bot_generic"]
+    },
+    {
+      "url": "@geotracker_telegram_bot",
+      "description": "геотрекер",
+      "topics": ["geo", "telegram", "bot_generic"]
+    },
+    {
+      "url": "@ref_generate_bot",
+      "description": "генерация изображений",
+      "topics": ["image_gen", "telegram", "bot_generic"]
+    },
+    {
+      "url": "@AutoParseAlertBot",
+      "description": "парсер каналов",
+      "topics": ["parser", "telegram", "bot_generic"]
+    },
+    {
+      "url": "@inseyet_bot",
+      "description": "анализ сообщений и интересов пользователя",
+      "topics": ["analytics", "telegram", "bot_generic"]
+    }
+  ],
+  "max_bots": [
+    {
+      "url": "https://max.ru/id183210316680_bot",
+      "description": "MAX-бот",
+      "topics": ["max", "vk", "bot_generic"]
+    },
+    {
+      "url": "https://max.ru/id7751316177_1_bot",
+      "description": "MAX-бот",
+      "topics": ["max", "vk", "bot_generic"]
+    }
+  ],
+  "parsers": [
+    {
+      "url": "https://marketplace.1c-bitrix.ru/solutions/leadspace.yandexreviewsslider/",
+      "description": "слайдер отзывов Яндекс",
+      "topics": ["parser", "website"]
+    },
+    {
+      "url": "https://marketplace.1c-bitrix.ru/solutions/leadspace.gisreviewsslider/",
+      "description": "слайдер отзывов 2ГИС",
+      "topics": ["parser", "website"]
+    },
+    {
+      "url": "https://github.com/Human0200/parser_kwork",
+      "description": "парсер Kwork",
+      "topics": ["parser"]
+    }
+  ],
+  "flagship_projects": [
+    {
+      "name": "LOGEA CRM",
+      "description": "полноценная CRM: компании, контакты, объекты, потребности, задачи, БД, автосбор информации",
+      "topics": ["crm"]
+    },
+    {
+      "name": "DayCargo",
+      "description": "автоматизация заказов на перевозки: боты, backend, БД, бизнес-логика",
+      "topics": ["logistics", "bot_generic", "crm"]
+    }
+  ]
+}
